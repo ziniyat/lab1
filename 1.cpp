@@ -1,162 +1,89 @@
-#include <iostream>
-#include <queue>
-#include <thread>
-#include <atomic>
-#include <mutex>
-#include <vector>
-#include <chrono>
+#include <iostream>       
+#include <vector>        
+#include <algorithm>      
+#include <chrono>         
+#include <cstdlib>        
+#include <boost/thread.hpp> 
 
-// Очередь задач без синхронизации (для демонстрации проблем)
-std::queue<int> noSinh;
-
-// Функция для добавления задач в очередь (без синхронизации)
-void Dobavl_noSinh(int id, int tasks) {
-    for (int i = 0; i < tasks; ++i) {
-        noSinh.push(id * 1000 + i); // Добавляем задачу в очередь
-    }
+// Функция для однопоточной сортировки
+void OdnopotochSort(std::vector<int>& mas) {
+    std::sort(mas.begin(), mas.end()); 
 }
 
-// Функция для извлечения задач из очереди (без синхронизации)
-void Izvlech_noSinh(int id) {
-    while (!noSinh.empty()) {
-        int task = noSinh.front(); // Получаем задачу из очереди
-        noSinh.pop(); // Удаляем задачу из очереди
-    }
+// Функция для сортировки части массива (выполняется в потоке)
+void SortChast(std::vector<int>& part) {
+    std::sort(part.begin(), part.end()); // Сортируем часть массива
 }
 
-// Очередь задач с использованием std::atomic для синхронизации
-std::queue<int> atomic_queue;
-std::atomic<bool> done(false); // Флаг завершения работы
+// Функция для многопоточной сортировки
+void MnogopotSort(std::vector<int>& Mas, int CountPotokov) {
+    const int MasSize = Mas.size(); // Размер массива
+    const int PartSize = MasSize / CountPotokov; // Размер части массива для каждого потока
 
-// Функция для добавления задач в очередь (с использованием std::atomic)
-void Dobavl_atomic(int id, int tasks) {
-    for (int i = 0; i < tasks; ++i) {
-        atomic_queue.push(id * 1000 + i); // Добавляем задачу в очередь
-    }
-}
+    // Вектор для хранения частей массива
+    std::vector<std::vector<int>> parts(CountPotokov);
 
-// Функция для извлечения задач из очереди (с использованием std::atomic)
-void Izvlech_atomic(int id) {
-    while (!done || !atomic_queue.empty()) { // Пока есть задачи или работа не завершена
-        if (!atomic_queue.empty()) {
-            int task = atomic_queue.front(); // Получаем задачу из очереди
-            atomic_queue.pop(); // Удаляем задачу из очереди
-        }
-    }
-}
-
-// Очередь задач с использованием std::mutex для синхронизации
-std::queue<int> mutex_queue;
-std::mutex mtx; // Мьютекс для блокировки доступа к очереди
-
-// Функция для добавления задач в очередь (с использованием std::mutex)
-void Dobavl_mutex(int id, int tasks) {
-    for (int i = 0; i < tasks; ++i) {
-        std::lock_guard<std::mutex> lock(mtx); // Блокируем доступ к очереди
-        mutex_queue.push(id * 1000 + i); // Добавляем задачу в очередь
-    }
-}
-
-// Функция для извлечения задач из очереди (с использованием std::mutex)
-void Izvlech_mutex(int id) {
-    while (true) {
-        std::lock_guard<std::mutex> lock(mtx); // Блокируем доступ к очереди
-        if (mutex_queue.empty()) break; // Если очередь пуста, завершаем работу
-        int task = mutex_queue.front(); // Получаем задачу из очереди
-        mutex_queue.pop(); // Удаляем задачу из очереди
-    }
-}
-
-// Функция для тестирования каждого подхода
-void test_queue(int CountDobavlS, int CountIzvlechS, int zadania_Dobavl) {
-    // Тестирование без синхронизации (демонстрация проблем)
-    {
-        std::vector<std::thread> Dobavls, Izvlechs;
-        auto start = std::chrono::steady_clock::now();
-
-        // Запуск потоков-производителей
-        for (int i = 0; i < CountDobavlS; ++i) {
-            Dobavls.emplace_back(Dobavl_noSinh, i, zadania_Dobavl);
-        }
-
-        // Запуск потоков-потребителей
-        for (int i = 0; i < CountIzvlechS; ++i) {
-            Izvlechs.emplace_back(Izvlech_noSinh, i);
-        }
-
-        // Ожидание завершения потоков
-        for (auto& t : Dobavls) t.join();
-        for (auto& t : Izvlechs) t.join();
-
-        auto end = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "время работы без синхронизации: " << duration.count() << "ms" << std::endl;
+    // Разделяем массив на части
+    for (int i = 0; i < CountPotokov; ++i) {
+        parts[i].resize(PartSize); //устанавливаем размер каждой части, resize - изменяет размер вектора  parts[i] так, чтобы он мог хранить PartSize элементов.
+        std::copy(Mas.begin() + i * PartSize, // начальный индекс части
+                  Mas.begin() + (i + 1) * PartSize, //конечный индекс части
+                  parts[i].begin());
     }
 
-    // Тестирование с использованием std::atomic
-    {
-        std::vector<std::thread> Dobavls, Izvlechs;
-        auto start = std::chrono::steady_clock::now();
+    // Вектор для хранения потоков
+    std::vector<boost::thread> threads;
 
-        // Запуск потоков-производителей
-        for (int i = 0; i < CountDobavlS; ++i) {
-            Dobavls.emplace_back(Dobavl_atomic, i, zadania_Dobavl);
-        }
-
-        // Запуск потоков-потребителей
-        for (int i = 0; i < CountIzvlechS; ++i) {
-            Izvlechs.emplace_back(Izvlech_atomic, i);
-        }
-
-        // Ожидание завершения потоков-производителей
-        for (auto& t : Dobavls) t.join();
-
-        // Устанавливаем флаг завершения работы
-        done = true;
-
-        // Ожидание завершения потоков-потребителей
-        for (auto& t : Izvlechs) t.join();
-
-        auto end = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "время Atomic-а: " << duration.count() << "ms" << std::endl;
-
-        // Сбрасываем флаг для следующих тестов
-        done = false;
+    // Создаем потоки для сортировки каждой части
+    for (int i = 0; i < CountPotokov; ++i) {
+        threads.emplace_back(SortChast, std::ref(parts[i])); // Запускаем поток
     }
 
-    // Тестирование с использованием std::mutex
-    {
-        std::vector<std::thread> Dobavls, Izvlechs;
-        auto start = std::chrono::steady_clock::now();
-
-        // Запуск потоков-производителей
-        for (int i = 0; i < CountDobavlS; ++i) {
-            Dobavls.emplace_back(Dobavl_mutex, i, zadania_Dobavl);
-        }
-
-        // Запуск потоков-потребителей
-        for (int i = 0; i < CountIzvlechS; ++i) {
-            Izvlechs.emplace_back(Izvlech_mutex, i);
-        }
-
-        // Ожидание завершения потоков
-        for (auto& t : Dobavls) t.join();
-        for (auto& t : Izvlechs) t.join();
-
-        auto end = std::chrono::steady_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-        std::cout << "время Mutex-a: " << duration.count() << "ms" << std::endl;
+    // Ожидаем завершения всех потоков
+    for (auto& thread : threads) {
+        thread.join();
     }
+
+    // Объединяем отсортированные части в один массив
+    std::vector<int> SortedMas;
+    for (const auto& part : parts) {
+        SortedMas.insert(SortedMas.end(), part.begin(), part.end());
+    }
+
+    // Сортируем объединенный массив (если части пересекаются)
+    std::sort(SortedMas.begin(), SortedMas.end());
+
+    // Возвращаем отсортированный массив
+    Mas = SortedMas;
 }
 
 int main() {
-    const int CountDobavlS = 2; // Количество потоков-производителей
-    const int CountIzvlechS = 2; // Количество потоков-потребителей
-    const int zadania_Dobavl = 1000; // Количество задач на каждого производителя
+    const int MasSize = 1000000; // Размер массива
+    std::vector<int> Mas(MasSize); // Основной массив
 
-    // Запуск тестирования
-    test_queue(CountDobavlS, CountIzvlechS, zadania_Dobavl);
+    // Заполняем массив случайными числами
+    std::srand(std::time(0)); // Инициализация генератора случайных чисел
+    for (int i = 0; i < MasSize; ++i) {
+        Mas[i] = std::rand() % 100000; // Случайное число от 0 до 99999
+    }
+
+    // Однопоточная сортировка
+    std::vector<int> mas1 = Mas; // Копируем массив
+    auto start1 = std::chrono::steady_clock::now(); // Засекаем время начала
+    OdnopotochSort(mas1); // Сортируем
+    auto end1 = std::chrono::steady_clock::now(); // Засекаем время окончания
+    auto duration1 = std::chrono::duration_cast<std::chrono::milliseconds>(end1 - start1); // Вычисляем время
+    std::cout << "Однопоточная сортировка заняла: " << duration1.count() << "ms" << std::endl; 
+
+    // Многопоточная сортировка с Boost.Thread
+    for (int CountPotokov : {2, 4, 8}) { // Тестируем на 2, 4 и 8 потоках
+        std::vector<int> mas2 = Mas; // Копируем массив
+        auto start2 = std::chrono::steady_clock::now(); // Засекаем время начала
+        MnogopotSort(mas2, CountPotokov); // Сортируем в нескольких потоках
+        auto end2 = std::chrono::steady_clock::now(); // Засекаем время окончания
+        auto duration2 = std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2); // Вычисляем время
+        std::cout << "Многопоточная сортировка с  " << CountPotokov << " потоками заняла: " << duration2.count() << "ms" << std::endl; 
+    }
 
     return 0;
 }
